@@ -104,9 +104,10 @@ JetPlusTrackCorrector::JetPlusTrackCorrector(const edm::ParameterSet& pset, edm:
   input_reco_muons_token_ = iC.consumes<RecoMuons>(muons_);
   input_reco_elecs_token_ = iC.consumes<RecoElectrons>(electrons_);
   input_reco_elec_ids_token_ = iC.consumes<RecoElectronIds>(electronIds_);
-
-  input_pat_muons_token_ = iC.consumes<pat::MuonCollection>(patmuons_);
-  input_pat_elecs_token_ = iC.consumes<pat::ElectronCollection>(patelectrons_);
+  if (! usereco_){
+    input_pat_muons_token_ = iC.consumes<pat::MuonCollection>(patmuons_);
+    input_pat_elecs_token_ = iC.consumes<pat::ElectronCollection>(patelectrons_);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -453,25 +454,11 @@ bool JetPlusTrackCorrector::jtaUsingEventData(const reco::Jet& fJet, const edm::
 //
 bool JetPlusTrackCorrector::getMuons(const edm::Event& event, edm::Handle<RecoMuons>& reco_muons) const {
   event.getByToken(input_reco_muons_token_, reco_muons);
-  if (!reco_muons.isValid() || reco_muons.failedToGet()) {
-    edm::LogError("JetPlusTrackCorrector") << "[JetPlusTrackCorrector::" << __func__ << "]"
-                                           << " Invalid handle to reco::Muon collection"
-                                           << " with InputTag (label:instance:process) \"" << muons_.label() << ":"
-                                           << muons_.instance() << ":" << muons_.process() << "\"";
-    return false;
-  }
   return true;
 }
 
-bool JetPlusTrackCorrector::getMuons(const edm::Event& event, edm::Handle<pat::MuonCollection>& reco_muons) const {
-  event.getByToken(input_pat_muons_token_, reco_muons);
-  if (!reco_muons.isValid() || reco_muons.failedToGet()) {
-    edm::LogError("JetPlusTrackCorrector") << "[JetPlusTrackCorrector::" << __func__ << "]"
-                                           << " Invalid handle to reco::Muon collection"
-                                           << " with InputTag (label:instance:process) \"" << muons_.label() << ":"
-                                           << muons_.instance() << ":" << muons_.process() << "\"";
-    return false;
-  }
+bool JetPlusTrackCorrector::getMuons(const edm::Event& event, edm::Handle<pat::MuonCollection>& pat_muons) const {
+  event.getByToken(input_pat_muons_token_, pat_muons);
   return true;
 }
 
@@ -1313,21 +1300,12 @@ bool JetPlusTrackCorrector::matchMuons(TrackRefs::const_iterator& itrk,
     return false;
   }
 
-  pat::MuonCollection::const_iterator imuon = muons->begin();
-  pat::MuonCollection::const_iterator jmuon = muons->end();
-
-  for (; imuon != jmuon; ++imuon) {
-    if (imuon->innerTrack().isNull() == 1)
+  for (auto const& muon : *muons) {
+    if (muon.innerTrack().isNull() == 1)
       continue;
-    //  std::cout<<"JetPlusTrackCorrector::matchMuons::Track "<<(**itrk).pt()<<" "
-    //  <<(**itrk).eta()<<" "<<(**itrk).phi()<<" Muon "<<
-    // (*(imuon->innerTrack())).pt()<<" "<< (*(imuon->innerTrack())).eta()<<" "<<
-    // (*(imuon->innerTrack())).phi()<<std::endl;
-    if (fabs((**itrk).pt() - (*(imuon->innerTrack())).pt()) < muonPtmatch_ &&
-        fabs((**itrk).eta() - (*(imuon->innerTrack())).eta()) < muonEtamatch_ &&
-        fabs((**itrk).phi() - (*(imuon->innerTrack())).phi()) < muonPhimatch_) {
-      //   std::cout<<" Needed muon-track "<<(**itrk).pt()<<" "<<
-      // (**itrk).eta()<<" "<<(**itrk).phi()<<std::endl;
+    if (fabs((**itrk).pt() - (*(muon.innerTrack())).pt()) < muonPtmatch_ &&
+        fabs((**itrk).eta() - (*(muon.innerTrack())).eta()) < muonEtamatch_ &&
+        fabs((**itrk).phi() - (*(muon.innerTrack())).phi()) < muonPhimatch_) {
       return true;
     }
   }
@@ -1348,9 +1326,7 @@ bool JetPlusTrackCorrector::matchElectrons(TrackRefs::const_iterator& itrk,
   double deltaRMIN = 999.;
 
   uint32_t electron_index = 0;
-  RecoElectrons::const_iterator ielec = elecs->begin();
-  RecoElectrons::const_iterator jelec = elecs->end();
-  for (; ielec != jelec; ++ielec) {
+  for (auto const& ielec : *elecs) {
     edm::Ref<RecoElectrons> electron_ref(elecs, electron_index);
     electron_index++;
 
@@ -1359,17 +1335,13 @@ bool JetPlusTrackCorrector::matchElectrons(TrackRefs::const_iterator& itrk,
     }  //@@ Check for null value
 
     // DR matching b/w electron and track
-
-    dR = deltaR(ielec->eta(), ielec->phi(), (*itrk)->momentum().eta(), (*itrk)->momentum().phi());
+    dR = deltaR(ielec,**itrk);
+//    dR = deltaR(ielec->eta(), ielec->phi(), (*itrk)->momentum().eta(), (*itrk)->momentum().phi());
     if (dR < deltaRMIN) {
       deltaRMIN = dR;
     }
   }
-
-  if (deltaRMIN < electronDRmatch_)
-    return true;
-  else
-    return false;
+  return deltaRMIN < electronDRmatch_;
 }
 
 bool JetPlusTrackCorrector::matchElectrons(TrackRefs::const_iterator& itrk,
@@ -1377,24 +1349,19 @@ bool JetPlusTrackCorrector::matchElectrons(TrackRefs::const_iterator& itrk,
   if (elecs->empty()) {
     return false;
   }
-  // std::cout<<"JetPlusTrackCorrector::matchElectrons "<<std::endl;
+ 
   double dR = 999.;
   double deltaRMIN = 999.;
-  pat::ElectronCollection::const_iterator ielec = elecs->begin();
-  pat::ElectronCollection::const_iterator jelec = elecs->end();
-  for (; ielec != jelec; ++ielec) {
-    //  std::cout<<"Electron "<<ielec->eta()<<" "<<ielec->phi()<<" Track "<<(*itrk)->momentum().eta()<<" "<<
-    //     (*itrk)->momentum().phi()<<" PT "<<ielec->pt()<<" "<<(*itrk)->pt()<<std::endl;
-    dR = deltaR(ielec->eta(), ielec->phi(), (*itrk)->momentum().eta(), (*itrk)->momentum().phi());
+//  pat::ElectronCollection::const_iterator ielec = elecs->begin();
+//  pat::ElectronCollection::const_iterator jelec = elecs->end();
+//  for (; ielec != jelec; ++ielec) {
+  for (auto const& ielec : *elecs) {
+    dR = deltaR(ielec,**itrk);
     if (dR < deltaRMIN) {
       deltaRMIN = dR;
     }
   }
-  //   std::cout<<" matchElectrons:DeltaR "<<deltaRMIN<<std::endl;
-  if (deltaRMIN < electronDRmatch_) { /*std::cout<<"Electron is accepted "<<std::endl;*/
-    return true;
-  } else
-    return false;
+  return deltaRMIN < electronDRmatch_;
 }
 
 // -----------------------------------------------------------------------------

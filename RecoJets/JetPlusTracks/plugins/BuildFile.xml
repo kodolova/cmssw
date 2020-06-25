@@ -4,22 +4,20 @@
   <use   name="CondFormats/JetMETObjects"/>
   <use   name="DataFormats/CaloTowers"/>
   <use   name="DataFormats/Candidate"/>
+  <use   name="DataFormats/PatCandidates"/>
   <use   name="DataFormats/Common"/>
   <use   name="DataFormats/DetId"/>
   <use   name="DataFormats/EgammaReco"/>
   <use   name="DataFormats/EgammaCandidates"/>
-  <use   name="EgammaAnalysis/ElectronTools"/>
   <use   name="DataFormats/JetReco"/>
   <use   name="DataFormats/Math"/>
   <use   name="DataFormats/MuonReco"/>
-  <use   name="DataFormats/Provenance"/>
   <use   name="DataFormats/TrackReco"/>
   <use   name="DataFormats/VertexReco"/>
   <use   name="FWCore/Framework"/>
   <use   name="FWCore/ParameterSet"/>
   <use   name="Geometry/Records"/>
   <use   name="Geometry/TrackerGeometryBuilder"/>
-  <use   name="RecoEgamma/EgammaTools"/>
   <use   name="FWCore/PluginManager"/>
   <flags   EDM_PLUGIN="1"/>
 </library>

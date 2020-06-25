@@ -21,8 +21,10 @@
 
 // user include files
 
+#include "FWCore/Framework/interface/Frameworkfwd.h"
+#include "FWCore/Framework/interface/stream/EDProducer.h"
+#include "FWCore/Framework/interface/Event.h"
 #include "FWCore/Framework/interface/MakerMacros.h"
-
 #include "FWCore/ParameterSet/interface/ParameterSet.h"
 
 #include "RecoJets/JetPlusTracks/plugins/JetPlusTrackProducer.h"
@@ -96,22 +98,16 @@ bool sort_by_pt(reco::JPTJet a, reco::JPTJet b) { return (a.pt() > b.pt()); }
 void JetPlusTrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iSetup) {
   using namespace edm;
 
-  //  std::cout<<" RecoJets::JetPlusTrackProducer::produce "<<std::endl;
+  std::cout<<" RecoJets::JetPlusTrackProducer::produce "<<std::endl;
+  //edm::Handle<edm::View<reco::CaloJet> > jets_h;
+  //iEvent.getByToken(input_jets_token_, jets_h);
+  auto const& jets_h = iEvent.get(input_jets_token_);
 
-  // get stuff from Event
-  edm::Handle<edm::View<reco::CaloJet> > jets_h;
-  iEvent.getByToken(input_jets_token_, jets_h);
+  std::cout<<" Calojets "<<jets_h.size()<<std::endl;
 
-  //JetPlusTrackAddonSeed
-  edm::Handle<edm::View<reco::CaloJet> > addjets_h;
-  iEvent.getByToken(input_addjets_token_, addjets_h);
+  auto const& addjets_h = iEvent.get(input_addjets_token_);
 
-  //std::cout<<" Additional Calojets "<<addjets_h->size()<<std::endl;
-
-  edm::Handle<edm::View<reco::TrackJet> > jetsTrackJets;
-  iEvent.getByToken(input_trackjets_token_, jetsTrackJets);
-
-  //std::cout<<" Additional Trackjets "<<jetsTrackJets->size()<<std::endl;
+  std::cout<<" Additional Calojets "<<addjets_h.size()<<std::endl;
 
   edm::Handle<std::vector<reco::TrackExtrapolation> > iExtrapolations;
   iEvent.getByToken(mExtrapolations, iExtrapolations);
@@ -124,26 +120,20 @@ void JetPlusTrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iS
 
   double scaleJPT = 1.;
   std::vector<reco::JPTJet> theJPTJets;
-  if (jetsTrackJets.isValid()) {
-    if (!jetsTrackJets->empty()) {
-      for (unsigned ijet = 0; ijet < jetsTrackJets->size(); ++ijet) {
-        const reco::TrackJet* jet = &(*(jetsTrackJets->refAt(ijet)));
+      for (auto const& jet : iEvent.get(input_trackjets_token_)) {
         int icalo = -1;
-        if (addjets_h.isValid()) {
-          for (unsigned i = 0; i < addjets_h->size(); ++i) {
-            const reco::CaloJet* oldjet = &(*(addjets_h->refAt(i)));
-            double dr = reco::deltaR<double>(jet->eta(), jet->phi(), oldjet->eta(), oldjet->phi());
-            if (dr <= dRcone) {
+        int i = 0;
+          for (auto const& oldjet : addjets_h) {
+            double dr2 = deltaR2(jet, oldjet);
+            if (dr2 <= dRcone*dRcone) {
               icalo = i;
             }
+            i++;
           }  // Calojets
-        }
         if (icalo < 0)
           continue;
-        const reco::CaloJet* mycalo = &(*(addjets_h->refAt(icalo)));
-        //     std::cout<<" Additional CaloJet "<<mycalo->pt()<<" "<<mycalo->eta()<<
-        //                                   " "<<mycalo->phi()<<std::endl;
-        std::vector<edm::Ptr<reco::Track> > tracksinjet = jet->tracks();
+        auto const& mycalo = addjets_h[icalo];
+        std::vector<edm::Ptr<reco::Track> > tracksinjet = jet.tracks();
         reco::TrackRefVector tracksincalo;
         reco::TrackRefVector tracksinvert;
         for (std::vector<edm::Ptr<reco::Track> >::iterator itrack = tracksinjet.begin(); itrack != tracksinjet.end();
@@ -161,22 +151,21 @@ void JetPlusTrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iS
               continue;
             tracksinvert.push_back(ixtrp->track());
             reco::TrackBase::Point const& point = ixtrp->positions().at(0);
-            double dr = reco::deltaR<double>(jet->eta(), jet->phi(), point.eta(), point.phi());
-            if (dr <= dRcone) {
-              /*std::cout<<" TrackINcalo "<<std::endl;*/
+            double dr2 = deltaR2(jet, point);
+            if (dr2 <= dRcone*dRcone) {
               tracksincalo.push_back(ixtrp->track());
             }
           }  // Track extrapolations
         }    // tracks
 
-        reco::TrackJet corrected = *jet;
+        reco::TrackJet corrected = jet;
         math::XYZTLorentzVector p4;
         jpt::MatchedTracks pions;
         jpt::MatchedTracks muons;
         jpt::MatchedTracks elecs;
 
         scaleJPT = mJPTalgo->correction(
-            corrected, *mycalo, iEvent, iSetup, tracksinvert, tracksincalo, p4, pions, muons, elecs);
+            corrected, mycalo, iEvent, iSetup, tracksinvert, tracksincalo, p4, pions, muons, elecs);
         // std::cout<<" JetPlusTrackProducer::AddSeedJet "<< (*mycalo).pt()<<" "<< (*mycalo).eta()<<" "<<
         //        (*mycalo).phi()<<" "<<(*mycalo).jetArea()<<" Corr "<<
         //       p4.pt()<<" "<<p4.eta()<<" "<<p4.phi()<<std::endl;
@@ -194,23 +183,23 @@ void JetPlusTrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iS
           reco::CaloJetRef myjet(pOut1RefProd, idxCaloJet++);
           jptspe.theCaloJetRef = edm::RefToBase<reco::Jet>(myjet);
           jptspe.mZSPCor = 1.;
-          reco::JPTJet fJet(p4, jet->primaryVertex()->position(), jptspe, mycalo->getJetConstituents());
+          reco::JPTJet fJet(p4, jet.primaryVertex()->position(), jptspe, mycalo.getJetConstituents());
           pOut->push_back(fJet);
-          pOut1->push_back(*mycalo);
+          pOut1->push_back(mycalo);
           theJPTJets.push_back(fJet);
         }
       }  // trackjets
-    }    // jets
-  }      // There is trackjet collection
 
-  // std::cout<<" Size of the addition "<<pOut->size()<<" "<<pOut1->size()<<std::endl;
+   std::cout<<" Size of the addition "<<pOut->size()<<" "<<pOut1->size()<<std::endl;
 
-  for (unsigned i = 0; i < jets_h->size(); ++i) {
-    const reco::CaloJet* oldjet = &(*(jets_h->refAt(i)));
-    reco::CaloJet corrected = *oldjet;
+//  for (unsigned i = 0; i < jets_h->size(); ++i) {
+//    const reco::CaloJet* oldjet = &(*(jets_h->refAt(i)));
+//    reco::CaloJet corrected = *oldjet;
+  int i = 0; 
+  for (auto const& oldjet : jets_h) {
+    reco::CaloJet corrected = oldjet;
 
     // ZSP corrections
-
     double factorZSP = 1.;
     if (useZSP)
       factorZSP = mZSPalgo->correction(corrected, iEvent, iSetup);
@@ -227,7 +216,7 @@ void JetPlusTrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iS
     bool ok = false;
 
     if (!vectorial_) {
-      scaleJPT = mJPTalgo->correction(corrected, *oldjet, iEvent, iSetup, pions, muons, elecs, ok);
+      scaleJPT = mJPTalgo->correction(corrected, oldjet, iEvent, iSetup, pions, muons, elecs, ok);
       p4 = math::XYZTLorentzVector(corrected.px() * scaleJPT,
                                    corrected.py() * scaleJPT,
                                    corrected.pz() * scaleJPT,
@@ -236,7 +225,7 @@ void JetPlusTrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iS
       // << (*oldjet).eta()<<" "<< (*oldjet).phi()<<
       //      " "<<scaleJPT<<" "<<(*oldjet).jetArea()<<std::endl;
     } else {
-      scaleJPT = mJPTalgo->correction(corrected, *oldjet, iEvent, iSetup, p4, pions, muons, elecs, ok);
+      scaleJPT = mJPTalgo->correction(corrected, oldjet, iEvent, iSetup, p4, pions, muons, elecs, ok);
       // std::cout<<" JetPlusTrackProducer::mainpart "<< (*oldjet).pt()<<" "<< (*oldjet).eta()<<" "<<
       //     (*oldjet).phi()<<" "<<(*oldjet).jetArea()<<" Corr "<<
       //    p4.pt()<<" "<<p4.eta()<<" "<<p4.phi()<<std::endl;
@@ -257,7 +246,7 @@ void JetPlusTrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iS
     }
 
     // Fill JPT Specific
-    edm::RefToBase<reco::Jet> myjet = (edm::RefToBase<reco::Jet>)jets_h->refAt(i);
+    edm::RefToBase<reco::Jet> myjet = (edm::RefToBase<reco::Jet>)(&jets_h)->refAt(i);
     specific.theCaloJetRef = myjet;
     specific.mZSPCor = factorZSP;
     specific.mResponseOfChargedWithEff = (float)mJPTalgo->getResponseOfChargedWithEff();
@@ -376,8 +365,7 @@ void JetPlusTrackProducer::produce(edm::Event& iEvent, const edm::EventSetup& iS
       vertex_ = pvCollection->begin()->position();
 
     reco::JPTJet fJet(p4, vertex_, specific, corrected.getJetConstituents());
-
-    //   fJet.printJet();
+    i++;
 
     // Output module
     if (fJet.pt() > ptCUT)
