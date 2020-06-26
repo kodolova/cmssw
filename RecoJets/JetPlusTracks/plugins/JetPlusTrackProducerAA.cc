@@ -356,7 +356,6 @@ void JetPlusTrackProducerAA::produce(edm::Event& iEvent, const edm::EventSetup& 
 
     // Output module
     pOut->push_back(*ij);
-
   }
 
   iEvent.put(std::move(pOut));
